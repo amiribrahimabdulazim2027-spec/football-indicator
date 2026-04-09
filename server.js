@@ -12,6 +12,28 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Browser path — uses env var in Docker, auto-detect locally
+const BROWSER_PATH = process.env.PUPPETEER_EXECUTABLE_PATH || null;
+
+function getBrowserOptions() {
+    const opts = {
+        headless: 'new',
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--window-size=1920,1080',
+            '--lang=en-US',
+            '--single-process',
+            '--no-zygote'
+        ],
+        defaultViewport: { width: 1920, height: 1080 }
+    };
+    if (BROWSER_PATH) opts.executablePath = BROWSER_PATH;
+    return opts;
+}
+
 // ═══════════════════════════════════════════════════
 //  FlashScore Data Extraction Engine v2
 //  Strategy: Intercept XHR responses + Smart DOM parsing
@@ -20,18 +42,7 @@ function sleep(ms) {
 async function extractMatchData(matchUrl) {
     let browser;
     try {
-        browser = await puppeteer.launch({
-            headless: 'new',
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--window-size=1920,1080',
-                '--lang=en-US'
-            ],
-            defaultViewport: { width: 1920, height: 1080 }
-        });
+        browser = await puppeteer.launch(getBrowserOptions());
 
         const page = await browser.newPage();
 
@@ -544,11 +555,7 @@ app.post('/api/debug', async (req, res) => {
     const { url } = req.body;
     let browser;
     try {
-        browser = await puppeteer.launch({
-            headless: 'new',
-            args: ['--no-sandbox', '--disable-setuid-sandbox'],
-            defaultViewport: { width: 1920, height: 1080 }
-        });
+        browser = await puppeteer.launch(getBrowserOptions());
 
         const page = await browser.newPage();
         await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });
@@ -651,18 +658,7 @@ app.post('/api/debug', async (req, res) => {
 async function fetchAllMatches() {
     let browser;
     try {
-        browser = await puppeteer.launch({
-            headless: 'new',
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--window-size=1920,1080',
-                '--lang=en-US'
-            ],
-            defaultViewport: { width: 1920, height: 1080 }
-        });
+        browser = await puppeteer.launch(getBrowserOptions());
 
         const page = await browser.newPage();
         await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });

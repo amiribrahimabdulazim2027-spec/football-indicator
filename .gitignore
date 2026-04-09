@@ -1,4 +1,7 @@
 node_modules/
-.git/
-*.md
-test_*.js
+debug_screenshot.png
+test-algorithm.js
+test-autopilot.js
+test_output.html
+*.log
+.env

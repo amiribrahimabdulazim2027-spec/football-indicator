@@ -31,32 +31,39 @@ class DoubleChanceEngine {
         const homeTeam = matchInfo.homeTeam;
         const awayTeam = matchInfo.awayTeam;
 
+        // Ensure standings has valid arrays
+        const safeStandings = {
+            overall: standings?.overall || [],
+            home: standings?.home || [],
+            away: standings?.away || []
+        };
+
         // Step 1: Power Balance
-        const powerBalance = this.analyzePowerBalance(homeTeam, awayTeam, standings.overall);
+        const powerBalance = this.analyzePowerBalance(homeTeam, awayTeam, safeStandings.overall);
 
         // Step 2: Home/Away Factor
-        const homeAwayFactor = this.analyzeHomeAway(homeTeam, awayTeam, standings.home, standings.away);
+        const homeAwayFactor = this.analyzeHomeAway(homeTeam, awayTeam, safeStandings.home, safeStandings.away);
 
         // Step 3: Form & Momentum
-        const formAnalysis = this.analyzeForm(homeTeam, awayTeam, lastMatches, standings.overall);
+        const formAnalysis = this.analyzeForm(homeTeam, awayTeam, lastMatches || { home: [], away: [] }, safeStandings.overall);
 
         // Step 4: H2H
-        const h2hAnalysis = this.analyzeH2H(homeTeam, awayTeam, h2h);
+        const h2hAnalysis = this.analyzeH2H(homeTeam, awayTeam, h2h || []);
 
         // Step 5: Motivation
-        const motivationAnalysis = this.analyzeMotivation(homeTeam, awayTeam, standings.overall);
+        const motivationAnalysis = this.analyzeMotivation(homeTeam, awayTeam, safeStandings.overall);
 
         // Step 6: Odds Analysis
-        const oddsAnalysis = this.analyzeOdds(odds);
+        const oddsAnalysis = this.analyzeOdds(odds || {});
 
         // Step 7: Detect Traps
-        const traps = this.detectTraps(homeTeam, awayTeam, standings, lastMatches, odds, formAnalysis, powerBalance);
+        const traps = this.detectTraps(homeTeam, awayTeam, safeStandings, lastMatches || { home: [], away: [] }, odds || {}, formAnalysis, powerBalance);
 
         // Step 8: Calculate confidence for each Double Chance option
         const scores = this.calculateScores(powerBalance, homeAwayFactor, formAnalysis, h2hAnalysis, motivationAnalysis, oddsAnalysis, traps);
 
         // Step 9: Over 1.5 Goals Analysis
-        const goalsAnalysis = this.analyzeGoals(homeTeam, awayTeam, standings, lastMatches, h2h);
+        const goalsAnalysis = this.analyzeGoals(homeTeam, awayTeam, safeStandings, lastMatches || { home: [], away: [] }, h2h || []);
 
         // Step 10: Final Decision (includes Over 1.5)
         const decision = this.makeDecision(scores, traps, goalsAnalysis);
@@ -645,10 +652,11 @@ class DoubleChanceEngine {
         };
     }
 
-    // ─── Over 1.5 Goals Analysis ───
+    // ─── Over 1.5 Goals Analysis ─── (v3 — Calibrated & Balanced)
     analyzeGoals(homeTeam, awayTeam, standings, lastMatches, h2h) {
-        let score = 50; // Start neutral
+        let score = 40; // Start BELOW neutral — must EARN confidence
         const details = [];
+        const warnings = [];
 
         // Helper: parse "30:11" → { for: 30, against: 11 }
         function parseGoals(goalsStr) {
@@ -664,10 +672,13 @@ class DoubleChanceEngine {
             return [parts[0] || 0, parts[1] || 0];
         }
 
-        // 1. Average goals from overall standings
+        // ═══════════════════════════════════════
+        // FACTOR 1: Expected Goals (xG proxy) — max +12
+        // ═══════════════════════════════════════
         const homeOverall = this.findTeam(homeTeam, standings.overall);
         const awayOverall = this.findTeam(awayTeam, standings.overall);
 
+        let expectedGoals = 0;
         if (homeOverall && awayOverall) {
             const hGoals = parseGoals(homeOverall.goals);
             const aGoals = parseGoals(awayOverall.goals);
@@ -679,111 +690,310 @@ class DoubleChanceEngine {
             const homeConcededPerMatch = hGoals.a / hMp;
             const awayConcededPerMatch = aGoals.a / aMp;
 
-            const expectedGoals = (homeGoalsPerMatch + awayGoalsPerMatch + homeConcededPerMatch + awayConcededPerMatch) / 2;
+            expectedGoals = (homeGoalsPerMatch + awayGoalsPerMatch + homeConcededPerMatch + awayConcededPerMatch) / 2;
             
-            if (expectedGoals >= 3.0) {
-                score += 20;
-                details.push(`⚽ معدل أهداف عالي جداً: ${expectedGoals.toFixed(1)} هدف/مباراة`);
+            if (expectedGoals >= 3.5) {
+                score += 12;
+                details.push(`⚽ معدل أهداف عالي جداً: ${expectedGoals.toFixed(2)} هدف/مباراة`);
+            } else if (expectedGoals >= 3.0) {
+                score += 9;
+                details.push(`⚽ معدل أهداف جيد: ${expectedGoals.toFixed(2)} هدف/مباراة`);
             } else if (expectedGoals >= 2.5) {
-                score += 15;
-                details.push(`⚽ معدل أهداف جيد: ${expectedGoals.toFixed(1)} هدف/مباراة`);
+                score += 6;
+                details.push(`⚽ معدل أهداف مقبول: ${expectedGoals.toFixed(2)} هدف/مباراة`);
             } else if (expectedGoals >= 2.0) {
-                score += 8;
-                details.push(`⚽ معدل أهداف متوسط: ${expectedGoals.toFixed(1)} هدف/مباراة`);
+                score += 2;
+                details.push(`⚽ معدل أهداف متوسط: ${expectedGoals.toFixed(2)} هدف/مباراة`);
             } else {
-                score -= 10;
-                details.push(`⚽ معدل أهداف منخفض: ${expectedGoals.toFixed(1)} هدف/مباراة`);
+                score -= 12;
+                details.push(`🚫 معدل أهداف منخفض: ${expectedGoals.toFixed(2)} هدف/مباراة — خطر!`);
+                warnings.push('معدل أهداف منخفض');
             }
+        } else {
+            score -= 8;
+            details.push('⚠️ لا توجد بيانات ترتيب كافية — خصم ثقة');
+            warnings.push('بيانات ناقصة');
         }
 
-        // 2. Home team scoring at home
+        // ═══════════════════════════════════════
+        // FACTOR 2: Home scoring at HOME — max +8
+        // ═══════════════════════════════════════
         const homeHome = this.findTeam(homeTeam, standings.home);
         if (homeHome) {
             const hg = parseGoals(homeHome.goals);
             const mp = parseInt(homeHome.mp) || 1;
             const homeHomeScoringRate = hg.f / mp;
+            const homeHomeConcedingRate = hg.a / mp;
+            const totalGoalsAtHome = (hg.f + hg.a) / mp;
+
             if (homeHomeScoringRate >= 2.0) {
-                score += 12;
-                details.push(`🏠 المضيف يسجل ${homeHomeScoringRate.toFixed(1)} هدف/مباراة في الديار`);
-            } else if (homeHomeScoringRate >= 1.5) {
                 score += 8;
-                details.push(`🏠 المضيف يسجل ${homeHomeScoringRate.toFixed(1)} هدف/مباراة في الديار`);
+                details.push(`🏠 المضيف يسجل ${homeHomeScoringRate.toFixed(2)} هدف/مباراة في الديار — ممتاز`);
+            } else if (homeHomeScoringRate >= 1.5) {
+                score += 5;
+                details.push(`🏠 المضيف يسجل ${homeHomeScoringRate.toFixed(2)} هدف/مباراة في الديار`);
+            } else if (homeHomeScoringRate < 1.0) {
+                score -= 8;
+                details.push(`🚫 المضيف يسجل ${homeHomeScoringRate.toFixed(2)} هدف/مباراة فقط في الديار — ضعيف!`);
+                warnings.push('المضيف ضعيف هجومياً في الديار');
+            }
+
+            // NEGATIVE: Clean sheets at home
+            const homeCleanSheets = (mp > 0 && hg.a === 0) ? mp : 0; // approximate
+            if (homeHomeConcedingRate < 0.6 && mp >= 5) {
+                score -= 6;
+                details.push(`🧤 المضيف يستقبل ${homeHomeConcedingRate.toFixed(2)} هدف/مباراة فقط في الديار — دفاع حصين`);
+                warnings.push('دفاع المضيف قوي — قد يقفل الماتش');
             }
         }
 
-        // 3. Away team conceding away
+        // ═══════════════════════════════════════
+        // FACTOR 3: Away conceding AWAY — max +8
+        // ═══════════════════════════════════════
         const awayAway = this.findTeam(awayTeam, standings.away);
         if (awayAway) {
             const ag = parseGoals(awayAway.goals);
             const mp = parseInt(awayAway.mp) || 1;
             const awayConcedingRate = ag.a / mp;
+            const awayScoringRate = ag.f / mp;
+
             if (awayConcedingRate >= 2.0) {
-                score += 12;
-                details.push(`✈️ الضيف يستقبل ${awayConcedingRate.toFixed(1)} هدف/مباراة خارج أرضه`);
-            } else if (awayConcedingRate >= 1.5) {
                 score += 8;
-                details.push(`✈️ الضيف يستقبل ${awayConcedingRate.toFixed(1)} هدف/مباراة خارج أرضه`);
+                details.push(`✈️ الضيف يستقبل ${awayConcedingRate.toFixed(2)} هدف/مباراة خارج أرضه — مفتوح`);
+            } else if (awayConcedingRate >= 1.5) {
+                score += 4;
+                details.push(`✈️ الضيف يستقبل ${awayConcedingRate.toFixed(2)} هدف/مباراة خارج أرضه`);
+            } else if (awayConcedingRate < 0.8) {
+                score -= 6;
+                details.push(`🧤 الضيف يستقبل ${awayConcedingRate.toFixed(2)} فقط خارج أرضه — دفاع قوي!`);
+                warnings.push('دفاع الضيف قوي بالخارج');
+            }
+
+            // NEGATIVE: Away team doesn't score
+            if (awayScoringRate < 0.5 && mp >= 5) {
+                score -= 5;
+                details.push(`🚫 الضيف يسجل ${awayScoringRate.toFixed(2)} فقط خارج أرضه — لا يساهم في الأهداف`);
+                warnings.push('الضيف لا يسجل بالخارج');
             }
         }
 
-        // 4. Recent form goals (last 5 matches)
+        // ═══════════════════════════════════════
+        // FACTOR 4: Over 1.5 HIT RATE — أهم عامل! max +15 / -15
+        // ═══════════════════════════════════════
+        let homeOver15Count = 0, homeMatchCount = 0;
+        let awayOver15Count = 0, awayMatchCount = 0;
+
+        if (lastMatches?.home && lastMatches.home.length > 0) {
+            lastMatches.home.forEach(m => {
+                const [s1, s2] = parseScore(m.score);
+                const totalG = s1 + s2;
+                if (totalG >= 2) homeOver15Count++;
+                homeMatchCount++;
+            });
+        }
+        if (lastMatches?.away && lastMatches.away.length > 0) {
+            lastMatches.away.forEach(m => {
+                const [s1, s2] = parseScore(m.score);
+                const totalG = s1 + s2;
+                if (totalG >= 2) awayOver15Count++;
+                awayMatchCount++;
+            });
+        }
+
+        const totalRecentMatches = homeMatchCount + awayMatchCount;
+        const totalOver15 = homeOver15Count + awayOver15Count;
+
+        if (totalRecentMatches >= 6) {
+            const hitRate = (totalOver15 / totalRecentMatches) * 100;
+            
+            if (hitRate >= 85) {
+                score += 15;
+                details.push(`🎯 نسبة Over 1.5 الفعلية: ${hitRate.toFixed(0)}% (${totalOver15}/${totalRecentMatches} ماتش) — ممتازة!`);
+            } else if (hitRate >= 70) {
+                score += 10;
+                details.push(`🎯 نسبة Over 1.5 الفعلية: ${hitRate.toFixed(0)}% (${totalOver15}/${totalRecentMatches} ماتش) — جيدة`);
+            } else if (hitRate >= 55) {
+                score += 3;
+                details.push(`🎯 نسبة Over 1.5 الفعلية: ${hitRate.toFixed(0)}% (${totalOver15}/${totalRecentMatches} ماتش) — متوسطة`);
+            } else {
+                score -= 15;
+                details.push(`🚫 نسبة Over 1.5 الفعلية: ${hitRate.toFixed(0)}% فقط (${totalOver15}/${totalRecentMatches} ماتش) — ضعيفة جداً!`);
+                warnings.push(`نسبة Over 1.5 الفعلية ${hitRate.toFixed(0)}% فقط`);
+            }
+        } else if (totalRecentMatches > 0) {
+            // Not enough data — cautious
+            score -= 3;
+            details.push(`📊 بيانات قليلة: ${totalRecentMatches} ماتشات فقط — خصم حذر`);
+        }
+
+        // ═══════════════════════════════════════
+        // FACTOR 5: Recent form goals average — max +6 / -8
+        // ═══════════════════════════════════════
         let recentGoals = 0;
-        let recentMatchCount = 0;
+        let recentMatchCount2 = 0;
 
         if (lastMatches?.home && lastMatches.home.length > 0) {
             lastMatches.home.forEach(m => {
                 const [s1, s2] = parseScore(m.score);
                 recentGoals += s1 + s2;
-                recentMatchCount++;
+                recentMatchCount2++;
             });
         }
         if (lastMatches?.away && lastMatches.away.length > 0) {
             lastMatches.away.forEach(m => {
                 const [s1, s2] = parseScore(m.score);
                 recentGoals += s1 + s2;
-                recentMatchCount++;
+                recentMatchCount2++;
             });
         }
 
-        if (recentMatchCount > 0) {
-            const avgRecentGoals = recentGoals / recentMatchCount;
-            if (avgRecentGoals >= 3.0) {
-                score += 10;
-                details.push(`📊 آخر المباريات: ${avgRecentGoals.toFixed(1)} هدف/مباراة — مرتفع`);
-            } else if (avgRecentGoals >= 2.0) {
-                score += 5;
-                details.push(`📊 آخر المباريات: ${avgRecentGoals.toFixed(1)} هدف/مباراة`);
-            } else {
-                score -= 5;
-                details.push(`📊 آخر المباريات: ${avgRecentGoals.toFixed(1)} هدف/مباراة — منخفض`);
+        if (recentMatchCount2 > 0) {
+            const avgRecentGoals = recentGoals / recentMatchCount2;
+            if (avgRecentGoals >= 3.5) {
+                score += 6;
+                details.push(`📊 متوسط أهداف آخر الماتشات: ${avgRecentGoals.toFixed(2)} — مرتفع`);
+            } else if (avgRecentGoals >= 2.5) {
+                score += 3;
+                details.push(`📊 متوسط أهداف آخر الماتشات: ${avgRecentGoals.toFixed(2)}`);
+            } else if (avgRecentGoals < 1.5) {
+                score -= 8;
+                details.push(`📊 متوسط أهداف آخر الماتشات: ${avgRecentGoals.toFixed(2)} — منخفض جداً!`);
+                warnings.push('معدل أهداف آخر الماتشات منخفض');
             }
         }
 
-        // 5. H2H goals
+        // ═══════════════════════════════════════
+        // FACTOR 6: H2H goals — max +5 / -8
+        // ═══════════════════════════════════════
         if (h2h && h2h.length > 0) {
             let h2hGoals = 0;
+            let h2hOver15 = 0;
             h2h.forEach(m => {
                 const [s1, s2] = parseScore(m.score);
                 h2hGoals += s1 + s2;
+                if (s1 + s2 >= 2) h2hOver15++;
             });
             const avgH2H = h2hGoals / h2h.length;
-            if (avgH2H >= 2.5) {
-                score += 8;
-                details.push(`🤝 المواجهات المباشرة: ${avgH2H.toFixed(1)} هدف/مباراة`);
+            const h2hHitRate = (h2hOver15 / h2h.length) * 100;
+
+            if (avgH2H >= 3.0 && h2hHitRate >= 70) {
+                score += 5;
+                details.push(`🤝 H2H: ${avgH2H.toFixed(1)} هدف/مباراة — Over 1.5 في ${h2hHitRate.toFixed(0)}% من المواجهات`);
+            } else if (avgH2H < 1.5 || h2hHitRate < 40) {
+                score -= 8;
+                details.push(`🤝 H2H: ${avgH2H.toFixed(1)} هدف/مباراة — Over 1.5 في ${h2hHitRate.toFixed(0)}% فقط — خطر!`);
+                warnings.push('المواجهات المباشرة قليلة الأهداف');
+            } else {
+                details.push(`🤝 H2H: ${avgH2H.toFixed(1)} هدف/مباراة — Over 1.5 في ${h2hHitRate.toFixed(0)}%`);
             }
         }
 
-        // Cap score
-        score = Math.max(10, Math.min(98, score));
+        // ═══════════════════════════════════════
+        // FACTOR 7: Derby / Relegation Penalty — up to -10
+        // ═══════════════════════════════════════
+        if (homeOverall && awayOverall) {
+            const rankDiff = Math.abs(homeOverall.rank - awayOverall.rank);
+            // Use max rank found in standings (not array length) — FlashScore may send full table
+            const maxRank = Math.max(...standings.overall.map(t => parseInt(t.rank) || 0));
+            const totalTeams = Math.max(maxRank, standings.overall.length, 16);
+            
+            // Derby: teams within 3 ranks of each other in mid-table
+            if (rankDiff <= 3 && homeOverall.rank > 3 && awayOverall.rank > 3) {
+                score -= 5;
+                details.push(`⚔️ ديربي ترتيب: الفريقين متقاربين (فارق ${rankDiff} مراكز) — عادة ماتشات حذرة`);
+                warnings.push('ماتش ديربي — عادة قليل أهداف');
+            }
 
-        const accepted = score >= 75;
-        const verdict = accepted ? '⚽ أكتر من 1.5 — ادخل ✅' : (score >= 60 ? '⚽ أكتر من 1.5 — محتمل ⚠️' : '⚽ أقل من 1.5 — تجنب ❌');
+            // Relegation match: both near bottom
+            if (homeOverall.rank >= totalTeams - 4 && awayOverall.rank >= totalTeams - 4) {
+                score -= 7;
+                details.push(`🚨 ماتش هبوط: الفريقين مهددين — ماتشات الخوف عادة قليلة الأهداف`);
+                warnings.push('ماتش هبوط — خطر نتيجة هزيلة');
+            }
+
+            // Both bottom-half teams
+            if (homeOverall.rank > totalTeams / 2 && awayOverall.rank > totalTeams / 2) {
+                score -= 3;
+                details.push(`📉 الفريقين في النصف الأسفل — مستوى هجومي أقل عادة`);
+            }
+        }
+
+        // ═══════════════════════════════════════
+        // FACTOR 8: 0-0 / Low Score Recent Check — up to -10
+        // ═══════════════════════════════════════
+        let zeroZeroCount = 0;
+        let underTwo = 0;
+        let allRecentMatches = [];
+
+        if (lastMatches?.home) allRecentMatches = allRecentMatches.concat(lastMatches.home);
+        if (lastMatches?.away) allRecentMatches = allRecentMatches.concat(lastMatches.away);
+
+        allRecentMatches.forEach(m => {
+            const [s1, s2] = parseScore(m.score);
+            if (s1 === 0 && s2 === 0) zeroZeroCount++;
+            if (s1 + s2 <= 1) underTwo++;
+        });
+
+        if (allRecentMatches.length >= 6) {
+            if (zeroZeroCount >= 2) {
+                score -= 10;
+                details.push(`🚫 ${zeroZeroCount} ماتشات 0-0 في آخر الماتشات — خطر كبير!`);
+                warnings.push(`${zeroZeroCount} ماتشات 0-0 أخيرة`);
+            }
+            const lowScoreRate = (underTwo / allRecentMatches.length) * 100;
+            if (lowScoreRate >= 40) {
+                score -= 8;
+                details.push(`🚫 ${lowScoreRate.toFixed(0)}% من الماتشات الأخيرة بهدف أو أقل — نمط خطير`);
+                warnings.push('نمط ماتشات قليلة الأهداف');
+            }
+        }
+
+        // ═══════════════════════════════════════
+        // FINAL SCORE & QUALITY GRADE
+        // ═══════════════════════════════════════
+        score = Math.max(5, Math.min(98, score));
+
+        // Quality grade system
+        let grade, gradeLabel, gradeColor;
+        if (score >= 85) {
+            grade = 'A';
+            gradeLabel = 'جودة A — مضمون | يصلح للقسيمة ✅';
+            gradeColor = '#00e676';
+        } else if (score >= 80) {
+            grade = 'B';
+            gradeLabel = 'جودة B — جيد | للمراهنات الفردية فقط ⚠️';
+            gradeColor = '#ffd740';
+        } else if (score >= 75) {
+            grade = 'C';
+            gradeLabel = 'جودة C — بحذر | لا يُنصح للقسائم ⚠️';
+            gradeColor = '#ff9100';
+        } else {
+            grade = 'F';
+            gradeLabel = 'مرفوض — لا تدخل ❌';
+            gradeColor = '#ff4757';
+        }
+
+        const accepted = score >= 80;
+        const cautious = score >= 75 && score < 80;
+        let verdict;
+        if (accepted) {
+            verdict = `⚽ Over 1.5 — ${gradeLabel}`;
+        } else if (cautious) {
+            verdict = `⚽ Over 1.5 — ${gradeLabel}`;
+        } else {
+            verdict = `⚽ Over 1.5 — ${gradeLabel}`;
+        }
 
         return {
             score,
             accepted,
+            cautious,
+            grade,
+            gradeLabel,
+            gradeColor,
             verdict,
             details,
+            warnings,
             label: 'Over 1.5 Goals'
         };
     }
@@ -824,16 +1034,16 @@ class DoubleChanceEngine {
 
         // ═══════════════════════════════════════
         // توصية 1: فرصة مزدوجة (DC) — مستقلة
+        // الحدود الجديدة: 80% قوي، 75% بحذر
         // ═══════════════════════════════════════
         let dcAccepted = false;
         let dcVerdict, dcAction;
         
-        if (adjustedConfidence >= 72 && highTraps === 0) {
+        if (adjustedConfidence >= 80 && highTraps === 0) {
             dcAccepted = true;
             dcVerdict = `🟢 ${bestOption} (${scores[bestOption].label}) — ثقة ${adjustedConfidence.toFixed(1)}%`;
             dcAction = `✅ ادخل بـ ${bestOption} (${scores[bestOption].label})`;
-        } else if (adjustedConfidence >= 65 && highTraps === 0) {
-            // Cautious accept — signal but warn
+        } else if (adjustedConfidence >= 75 && highTraps === 0) {
             dcAccepted = true;
             dcVerdict = `🟡 ${bestOption} (${scores[bestOption].label}) — ثقة ${adjustedConfidence.toFixed(1)}% — بحذر`;
             dcAction = `⚠️ ادخل بحذر بـ ${bestOption} (${scores[bestOption].label})`;
@@ -844,35 +1054,44 @@ class DoubleChanceEngine {
 
         // ═══════════════════════════════════════
         // توصية 2: أكتر من 1.5 — مستقلة
+        // الحدود الجديدة: 80% قوي، 75% بحذر (فردي فقط)
         // ═══════════════════════════════════════
         let goalsAccepted = false;
+        let goalsCautious = false;
         let goalsVerdict, goalsAction;
         const goalsScore = goalsAnalysis ? goalsAnalysis.score : 0;
+        const goalsGrade = goalsAnalysis ? goalsAnalysis.grade : 'F';
+        const goalsWarnings = goalsAnalysis ? (goalsAnalysis.warnings || []) : [];
 
-        if (goalsScore >= 72 && highTraps === 0) {
+        if (goalsScore >= 80 && highTraps === 0 && goalsWarnings.length <= 1) {
             goalsAccepted = true;
-            goalsVerdict = `⚽ Over 1.5 — ثقة ${goalsScore.toFixed(1)}%`;
-            goalsAction = '✅ ادخل Over 1.5 Goals';
-        } else if (goalsScore >= 65 && highTraps === 0) {
-            goalsAccepted = true;
-            goalsVerdict = `⚽ Over 1.5 — ثقة ${goalsScore.toFixed(1)}% — بحذر`;
-            goalsAction = '⚠️ ادخل Over 1.5 بحذر';
+            goalsVerdict = `⚽ Over 1.5 — ثقة ${goalsScore.toFixed(1)}% [${goalsGrade}]`;
+            goalsAction = `✅ ادخل Over 1.5 Goals [جودة ${goalsGrade}]`;
+        } else if (goalsScore >= 75 && highTraps === 0 && goalsWarnings.length <= 2) {
+            goalsCautious = true;
+            goalsVerdict = `⚽ Over 1.5 — ثقة ${goalsScore.toFixed(1)}% — فردي فقط [${goalsGrade}]`;
+            goalsAction = `⚠️ Over 1.5 فردي فقط — لا تضيفه للقسيمة [جودة ${goalsGrade}]`;
         } else {
-            goalsVerdict = `🔴 Over 1.5 — ثقة ${goalsScore.toFixed(1)}% — غير كافية`;
-            goalsAction = 'لا تدخل';
+            goalsVerdict = `🔴 Over 1.5 — ثقة ${goalsScore.toFixed(1)}% — مرفوض [${goalsGrade}]`;
+            goalsAction = 'لا تدخل Over 1.5';
         }
 
         // ═══════════════════════════════════════
-        // القرار النهائي: مقبول لو واحدة على الأقل اتقبلت
+        // القرار النهائي
         // ═══════════════════════════════════════
         const accepted = dcAccepted || goalsAccepted;
         
         let verdict, verdictClass, action, recommendation;
         if (dcAccepted && goalsAccepted) {
-            verdict = '🟢 مباراة مضمونة — فرصتين ✅';
+            verdict = `🟢 مباراة مضمونة — فرصتين [جودة ${goalsGrade}] ✅`;
             verdictClass = 'attack';
             action = dcAction + ' + ' + goalsAction;
             recommendation = bestOption + ' + Over 1.5';
+        } else if (dcAccepted && goalsCautious) {
+            verdict = `🟢 DC مقبول + Over 1.5 فردي فقط`;
+            verdictClass = 'attack';
+            action = dcAction + ' | ' + goalsAction;
+            recommendation = bestOption + ' (+ Over 1.5 فردي)';
         } else if (dcAccepted) {
             verdict = dcVerdict;
             verdictClass = 'attack';
@@ -883,9 +1102,14 @@ class DoubleChanceEngine {
             verdictClass = 'attack';
             action = goalsAction;
             recommendation = 'Over 1.5';
+        } else if (goalsCautious) {
+            verdict = goalsVerdict;
+            verdictClass = 'caution';
+            action = goalsAction;
+            recommendation = 'Over 1.5 (فردي)';
         } else {
-            verdict = adjustedConfidence >= 65 ? '🟡 غير مضمونة ⚠️' : '🔴 تجاوز ❌';
-            verdictClass = adjustedConfidence >= 65 ? 'caution' : 'skip';
+            verdict = adjustedConfidence >= 70 ? '🟡 غير مضمونة ⚠️' : '🔴 تجاوز ❌';
+            verdictClass = adjustedConfidence >= 70 ? 'caution' : 'skip';
             action = 'لا تدخل — المباراة مش مضمونة';
             recommendation = 'تجاوز';
         }
@@ -895,9 +1119,9 @@ class DoubleChanceEngine {
         const cons = [];
 
         Object.entries(scores).forEach(([option, data]) => {
-            if (data.score >= 70) {
+            if (data.score >= 75) {
                 pros.push(`${option} (${data.label}): ${data.score.toFixed(1)}% — مؤشر قوي`);
-            } else if (data.score >= 60) {
+            } else if (data.score >= 65) {
                 pros.push(`${option} (${data.label}): ${data.score.toFixed(1)}% — مؤشر جيد`);
             } else if (data.score < 40) {
                 cons.push(`${option} (${data.label}): ${data.score.toFixed(1)}% — مؤشر ضعيف`);
@@ -906,9 +1130,15 @@ class DoubleChanceEngine {
 
         if (goalsAnalysis) {
             if (goalsAccepted) {
-                pros.push(`⚽ Over 1.5: ${goalsScore.toFixed(1)}% — أهداف متوقعة`);
+                pros.push(`⚽ Over 1.5: ${goalsScore.toFixed(1)}% [جودة ${goalsGrade}] — أهداف متوقعة`);
+            } else if (goalsCautious) {
+                pros.push(`⚽ Over 1.5: ${goalsScore.toFixed(1)}% [جودة ${goalsGrade}] — فردي فقط`);
             }
             goalsAnalysis.details.forEach(d => pros.push(d));
+            // Add warnings as cons
+            if (goalsAnalysis.warnings) {
+                goalsAnalysis.warnings.forEach(w => cons.push(`⚠️ Over 1.5: ${w}`));
+            }
         }
 
         if (traps.length === 0) {
@@ -926,7 +1156,9 @@ class DoubleChanceEngine {
             accepted,
             dcAccepted,
             goalsAccepted,
+            goalsCautious: goalsCautious,
             goalsScore,
+            goalsGrade: goalsGrade,
             verdict,
             verdictClass,
             action,

@@ -34,6 +34,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+    
+    // Restore saved recommendations from localStorage
+    restoreSavedRecommendations();
 });
 
 // ─── Particles Effect ───
@@ -445,6 +448,13 @@ async function handleAnalyze() {
         return;
     }
 
+    // ─── Data Validation ───
+    const validationErrors = validateExtractedData(extractedData);
+    if (validationErrors.length > 0) {
+        showStatus(`⚠️ بيانات ناقصة: ${validationErrors.join(' | ')}`, 'error');
+        return;
+    }
+
     const btnAnalyze = document.getElementById('btn-analyze');
     btnAnalyze.disabled = true;
     btnAnalyze.querySelector('.btn-text').textContent = 'جاري التحليل...';
@@ -479,6 +489,24 @@ async function handleAnalyze() {
     
     btnAnalyze.disabled = false;
     btnAnalyze.querySelector('.btn-text').textContent = 'تحليل المباراة';
+}
+
+// ─── Data Validation ───
+function validateExtractedData(data) {
+    const errors = [];
+    if (!data.matchInfo?.homeTeam || !data.matchInfo?.awayTeam) {
+        errors.push('أسماء الفرق ناقصة');
+    }
+    if (!data.standings?.overall || data.standings.overall.length === 0) {
+        errors.push('لا يوجد ترتيب عام');
+    }
+    if (data.standings?.overall?.length > 0) {
+        const homeFound = engine.findTeam(data.matchInfo.homeTeam, data.standings.overall);
+        const awayFound = engine.findTeam(data.matchInfo.awayTeam, data.standings.overall);
+        if (!homeFound) errors.push(`المضيف "${data.matchInfo.homeTeam}" غير موجود في الترتيب`);
+        if (!awayFound) errors.push(`الضيف "${data.matchInfo.awayTeam}" غير موجود في الترتيب`);
+    }
+    return errors;
 }
 
 // ═══════════════════════════════════════════════════
@@ -678,7 +706,7 @@ function showVerdict(courtroomResult, analysisResult) {
     section.classList.remove('hidden');
 
     const { bestOption, bestScore, accepted, votesFor, votesAgainst, votesNeutral } = courtroomResult;
-    const { traps, scores } = analysisResult;
+    const { traps, scores, goalsAnalysis, decision } = analysisResult;
 
     // Get all scores
     let scoresHTML = '';
@@ -689,6 +717,34 @@ function showVerdict(courtroomResult, analysisResult) {
             <span class="verdict-stat-value ${isHighest ? (accepted ? 'green' : 'red') : 'gold'}">${data.score.toFixed(1)}%</span>
         </div>`;
     });
+
+    // Over 1.5 Quality Grade Badge
+    let goalsGradeHTML = '';
+    if (goalsAnalysis) {
+        const grade = goalsAnalysis.grade || 'F';
+        const gradeColor = goalsAnalysis.gradeColor || '#ff4757';
+        const gradeLabel = goalsAnalysis.gradeLabel || 'مرفوض';
+        
+        goalsGradeHTML = `
+        <div class="verdict-goals-grade" style="margin-top:16px;padding:12px 16px;border-radius:12px;background:${gradeColor}11;border:1px solid ${gradeColor}33">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+                <span style="font-size:1.8rem;font-weight:900;color:${gradeColor}">${grade}</span>
+                <div>
+                    <div style="font-weight:700;color:${gradeColor}">⚽ Over 1.5 Goals — ${goalsAnalysis.score.toFixed(1)}%</div>
+                    <div style="font-size:0.85rem;color:var(--text-secondary)">${gradeLabel}</div>
+                </div>
+            </div>
+            ${goalsAnalysis.warnings && goalsAnalysis.warnings.length > 0 ? `
+            <div style="margin-top:8px;padding-top:8px;border-top:1px solid ${gradeColor}22">
+                <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:4px">تحذيرات:</div>
+                ${goalsAnalysis.warnings.map(w => `<div style="font-size:0.85rem;color:${gradeColor};padding:2px 0">⚠️ ${w}</div>`).join('')}
+            </div>` : ''}
+            ${goalsAnalysis.details ? `
+            <div style="margin-top:8px;padding-top:8px;border-top:1px solid ${gradeColor}22">
+                ${goalsAnalysis.details.map(d => `<div style="font-size:0.82rem;color:var(--text-secondary);padding:1px 0">${d}</div>`).join('')}
+            </div>` : ''}
+        </div>`;
+    }
 
     // Reasons
     let prosHTML = '';
@@ -723,9 +779,9 @@ function showVerdict(courtroomResult, analysisResult) {
 
     content.innerHTML = `
         <div class="verdict-result">
-            <div class="verdict-decision ${accepted ? 'attack' : 'skip'}">
-                ${accepted ? '✅ هجوم — الفرصة مؤهلة' : '❌ تجاوز — لا توجد فرصة بثقة ≥ 90%'}
-            </div>
+            ${accepted ? `<div class="verdict-decision ${courtroomResult.finalVerdictClass}">
+                ${courtroomResult.finalVerdictClass === 'attack' ? '✅ هجوم — الفرصة مؤهلة' : '⚠️ هجوم بحذر — الفرصة مقبولة'}
+            </div>` : `<div class="verdict-decision skip">❌ تجاوز — الحد الأدنى 80%</div>`}
             ${accepted ? `<div class="verdict-choice">${bestOption}</div>` : ''}
         </div>
 
@@ -747,6 +803,8 @@ function showVerdict(courtroomResult, analysisResult) {
         <div class="verdict-stats">
             ${scoresHTML}
         </div>
+
+        ${goalsGradeHTML}
 
         ${prosHTML ? `<div class="verdict-reasons"><h4>✅ أسباب مؤيدة:</h4>${prosHTML}</div>` : ''}
         ${consHTML ? `<div class="verdict-reasons"><h4>⚠️ نقاط حذر:</h4>${consHTML}</div>` : ''}
@@ -1046,24 +1104,30 @@ function getCountryFlag(country) {
 //  Fully autonomous: Fetch → Extract → Analyze → Recommend
 // ═══════════════════════════════════════════════════
 
-// ─── League Filter: Only 1st & 2nd Division ───
+// ─── League Filter: Only leagues with standings ───
 function isAllowedLeague(leagueName) {
     const name = leagueName.toLowerCase();
     
-    // ❌ EXCLUDE: Cups, knockouts, friendlies, youth, 3rd division+
+    // ❌ EXCLUDE: Cups, knockouts, friendlies, youth, qualifiers
     const excluded = [
         'cup', 'copa', 'coupe', 'pokal', 'trophy', 'shield',
         'كأس', 'كاس',
         'friendly', 'club friendly',
-        'youth', 'u19', 'u20', 'u21', 'u23', 'reserve', 'women',
+        'youth', 'u17', 'u19', 'u20', 'u21', 'u23', 'reserve', 'women',
         'amateur', 'regional',
         'league 3', 'ligue 3', 'liga 3', 'serie c', 'serie d',
         'division 3', 'division 4', 'division 5',
         '3. liga', '3rd division', 'tercera', 'terza',
         'national league', 'conference league',
         'play offs', 'play-offs', 'playoff',
+        'quarter-final', 'quarter final', 'semi-final', 'semi final', 'final',
+        'round of 16', 'round of 32', 'knockout',
         'qualification', 'qualifying',
         'super cup', 'supercup', 'community shield',
+        'champions league', 'europa league', 'libertadores',
+        'sudamericana', 'concacaf', 'afc',
+        'relegation group',
+        'championship u', 'south american championship',
     ];
     
     for (const ex of excluded) {
@@ -1235,12 +1299,36 @@ async function startAutoPilot() {
                 });
                 clearTimeout(extractTimeout);
 
-                const extractResult = await extractResponse.json();
+                let extractResult = await extractResponse.json();
 
                 if (!extractResult.success || !extractResult.data) {
-                    // Failed extraction — skip
+                    // Failed extraction — retry once
+                    console.log(`[AUTOPILOT] Retrying ${matchName}...`);
+                    await new Promise(r => setTimeout(r, 3000));
+                    
+                    const retryCtrl = new AbortController();
+                    const retryTimeout = setTimeout(() => retryCtrl.abort(), 300000);
+                    try {
+                        const retryResponse = await fetch('/api/extract', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ url: match.url }),
+                            signal: retryCtrl.signal
+                        });
+                        clearTimeout(retryTimeout);
+                        const retryResult = await retryResponse.json();
+                        if (retryResult.success && retryResult.data) {
+                            extractResult = retryResult;
+                        }
+                    } catch(retryErr) {
+                        clearTimeout(retryTimeout);
+                    }
+                }
+                
+                if (!extractResult.success || !extractResult.data) {
+                    // Still failed after retry — skip
                     feedProcessing.className = 'autopilot-feed-item rejected';
-                    feedProcessing.innerHTML = `<div class="feed-match-name">⚠️ ${matchName}</div><div class="feed-result rejected">فشل الاستخراج — تم التخطي</div>`;
+                    feedProcessing.innerHTML = `<div class="feed-match-name">⚠️ ${matchName}</div><div class="feed-result rejected">فشل الاستخراج (بعد إعادة المحاولة) — تم التخطي`;
                     errors++;
                     analyzed++;
                     continue;
@@ -1249,6 +1337,16 @@ async function startAutoPilot() {
                 // Display extracted data in the data panel (live view)
                 extractedData = extractResult.data;
                 displayExtractedData(extractResult.data);
+
+                // Validate data before analysis
+                const validationErrors = validateExtractedData(extractResult.data);
+                if (validationErrors.length > 0) {
+                    feedProcessing.className = 'autopilot-feed-item rejected';
+                    feedProcessing.innerHTML = `<div class="feed-match-name">⚠️ ${matchName}</div><div class="feed-result rejected">بيانات ناقصة: ${validationErrors[0]}</div>`;
+                    rejected++;
+                    analyzed++;
+                    continue;
+                }
 
                 // Run Analysis Engine
                 const analysisResult = engine.analyze(extractResult.data);
@@ -1266,7 +1364,8 @@ async function startAutoPilot() {
                     // Build feed text showing which recommendations accepted
                     let feedParts = [];
                     if (decision.dcAccepted) feedParts.push(`${decision.bestOption} (${decision.confidence.toFixed(1)}%)`);
-                    if (decision.goalsAccepted) feedParts.push(`Over 1.5 (${decision.goalsScore.toFixed(1)}%)`);
+                    if (decision.goalsAccepted) feedParts.push(`Over 1.5 [${decision.goalsGrade}] (${decision.goalsScore.toFixed(1)}%)`);
+                    if (decision.goalsCautious && !decision.goalsAccepted) feedParts.push(`Over 1.5 فردي [${decision.goalsGrade}] (${decision.goalsScore.toFixed(1)}%)`);
                     
                     feedProcessing.innerHTML = `
                         <div class="feed-match-name">✅ ${matchName}</div>
@@ -1302,15 +1401,40 @@ async function startAutoPilot() {
                             recommendation: 'Over 1.5',
                             type: 'أكتر من 1.5 هدف',
                             confidence: decision.goalsScore,
-                            verdict: `⚽ Over 1.5 — ثقة ${decision.goalsScore.toFixed(1)}%`,
-                            action: '✅ أكتر من 1.5 هدف في المباراة',
+                            grade: decision.goalsGrade || 'B',
+                            verdict: `⚽ Over 1.5 — ثقة ${decision.goalsScore.toFixed(1)}% [جودة ${decision.goalsGrade || '?'}]`,
+                            action: `✅ Over 1.5 [جودة ${decision.goalsGrade || '?'}]`,
+                            accumulatorSafe: decision.goalsGrade === 'A',
                             url: match.url
                         };
                         acceptedMatches.push(goalsItem);
                         renderRecommendation(goalsItem);
                     }
                     
+                    // Handle cautious goals (show but mark as individual only)
+                    if (decision.goalsCautious && !decision.goalsAccepted) {
+                        const cautionItem = {
+                            matchName,
+                            league: matchLeague || extractResult.data.matchInfo?.league || '',
+                            country: matchCountry || '',
+                            time: match.time || extractResult.data.matchInfo?.dateTime || '',
+                            recommendation: 'Over 1.5 (فردي)',
+                            type: 'Over 1.5 فردي فقط',
+                            confidence: decision.goalsScore,
+                            grade: decision.goalsGrade || 'C',
+                            verdict: `⚽ Over 1.5 — ${decision.goalsScore.toFixed(1)}% [جودة ${decision.goalsGrade || '?'}] — فردي فقط`,
+                            action: `⚠️ Over 1.5 فردي فقط — لا تضيفه للقسيمة`,
+                            accumulatorSafe: false,
+                            url: match.url
+                        };
+                        acceptedMatches.push(cautionItem);
+                        renderRecommendation(cautionItem);
+                    }
+                    
                     document.getElementById('rec-count-badge').textContent = acceptedMatches.length;
+                    
+                    // Save to localStorage
+                    saveRecommendationsToStorage();
 
                 } else {
                     // ❌ REJECTED
@@ -1396,7 +1520,10 @@ function renderRecommendation(rec) {
     const el = document.createElement('div');
     el.className = 'rec-item';
     
-    const confidenceIcon = rec.confidence >= 75 ? '🟢' : '🟡';
+    const confidenceIcon = rec.confidence >= 85 ? '🟢' : rec.confidence >= 80 ? '🟡' : rec.confidence >= 75 ? '🟠' : '🔴';
+    const gradeText = rec.grade ? ` [جودة ${rec.grade}]` : '';
+    const accSafe = rec.accumulatorSafe ? '<span style="color:#00e676;font-size:0.75rem">✅ قسيمة</span>' : 
+                    (rec.accumulatorSafe === false ? '<span style="color:#ff9100;font-size:0.75rem">⚠️ فردي فقط</span>' : '');
     
     el.innerHTML = `
         <div class="rec-verdict">${confidenceIcon}</div>
@@ -1405,21 +1532,130 @@ function renderRecommendation(rec) {
             <div class="rec-league">${rec.country ? rec.country + ' — ' : ''}${rec.league} ${rec.time ? '| ' + rec.time : ''}</div>
         </div>
         <div class="rec-details">
-            <div class="rec-option">${rec.recommendation}</div>
+            <div class="rec-option">${rec.recommendation}${gradeText}</div>
             <div class="rec-confidence">ثقة ${rec.confidence.toFixed(1)}%</div>
             <div class="rec-action-text">${rec.action || ''}</div>
+            ${accSafe}
         </div>
     `;
     list.appendChild(el);
+    
+    // Update accumulator calculator
+    updateAccumulatorCalc();
     
     // Scroll recommendations into view
     document.getElementById('recommendations-section').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
-// ─── Auto-start on page load ───
-document.addEventListener('DOMContentLoaded', () => {
-    // Auto-start the pilot after a short delay
-    setTimeout(() => {
-        startAutoPilot();
-    }, 2000);
-});
+// ═══════════════════════════════════════════════════
+//  🧮 Accumulator Calculator
+// ═══════════════════════════════════════════════════
+
+function updateAccumulatorCalc() {
+    // Filter only accumulator-safe matches (grade A)
+    const safeMatches = acceptedMatches.filter(m => m.accumulatorSafe === true);
+    const allAccepted = acceptedMatches.filter(m => m.confidence >= 80);
+    
+    // Calculate combined probability
+    let combinedProb = 1;
+    allAccepted.forEach(m => {
+        combinedProb *= (m.confidence / 100);
+    });
+    const combinedPercent = (combinedProb * 100);
+    
+    let safeCombinedProb = 1;
+    safeMatches.forEach(m => {
+        safeCombinedProb *= (m.confidence / 100);
+    });
+    const safeCombinedPercent = (safeCombinedProb * 100);
+
+    // Create or update accumulator display
+    let accEl = document.getElementById('accumulator-calc');
+    if (!accEl) {
+        accEl = document.createElement('div');
+        accEl.id = 'accumulator-calc';
+        accEl.style.cssText = 'margin-top:16px;padding:16px;border-radius:12px;background:rgba(240,185,11,0.06);border:1px solid rgba(240,185,11,0.2);';
+        const recSection = document.getElementById('recommendations-section');
+        const recList = document.getElementById('recommendations-list');
+        recSection.insertBefore(accEl, recList);
+    }
+
+    const danger = combinedPercent < 50;
+    const warning = combinedPercent < 65 && combinedPercent >= 50;
+
+    accEl.innerHTML = `
+        <div style="font-weight:700;color:var(--gold-primary);margin-bottom:10px;font-size:1rem">🧮 حاسبة القسيمة المجمعة</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+            <div style="padding:8px 12px;border-radius:8px;background:rgba(0,230,118,0.08);border:1px solid rgba(0,230,118,0.2)">
+                <div style="font-size:0.75rem;color:var(--text-muted)">ماتشات مقبولة (80%+)</div>
+                <div style="font-size:1.3rem;font-weight:800;color:#00e676">${allAccepted.length}</div>
+            </div>
+            <div style="padding:8px 12px;border-radius:8px;background:rgba(240,185,11,0.08);border:1px solid rgba(240,185,11,0.2)">
+                <div style="font-size:0.75rem;color:var(--text-muted)">تصلح للقسيمة (جودة A)</div>
+                <div style="font-size:1.3rem;font-weight:800;color:var(--gold-primary)">${safeMatches.length}</div>
+            </div>
+        </div>
+        ${allAccepted.length >= 2 ? `
+        <div style="padding:10px 12px;border-radius:8px;background:${danger ? 'rgba(255,71,87,0.1)' : warning ? 'rgba(255,145,0,0.1)' : 'rgba(0,230,118,0.06)'};border:1px solid ${danger ? 'rgba(255,71,87,0.3)' : warning ? 'rgba(255,145,0,0.3)' : 'rgba(0,230,118,0.2)'}">
+            <div style="font-size:0.8rem;color:var(--text-muted)">احتمال نجاح القسيمة (كل المقبولة):</div>
+            <div style="font-size:1.5rem;font-weight:900;color:${danger ? '#ff4757' : warning ? '#ff9100' : '#00e676'}">${combinedPercent.toFixed(1)}%</div>
+            ${danger ? '<div style="font-size:0.8rem;color:#ff4757;margin-top:4px">🚨 خطر! القسيمة احتمال نجاحها منخفض — قلل عدد الماتشات!</div>' : 
+             warning ? '<div style="font-size:0.8rem;color:#ff9100;margin-top:4px">⚠️ احتمال متوسط — خلي القسيمة أقل من 4 ماتشات</div>' : ''}
+        </div>` : ''}
+        ${safeMatches.length >= 2 ? `
+        <div style="padding:10px 12px;border-radius:8px;background:rgba(0,230,118,0.06);border:1px solid rgba(0,230,118,0.2);margin-top:8px">
+            <div style="font-size:0.8rem;color:var(--text-muted)">احتمال نجاح القسيمة (جودة A فقط):</div>
+            <div style="font-size:1.3rem;font-weight:900;color:#00e676">${safeCombinedPercent.toFixed(1)}%</div>
+        </div>` : ''}
+    `;
+}
+
+// ═══════════════════════════════════════════════════
+//  💾 LocalStorage Persistence
+// ═══════════════════════════════════════════════════
+
+function saveRecommendationsToStorage() {
+    try {
+        const data = {
+            acceptedMatches,
+            timestamp: new Date().toISOString(),
+            date: new Date().toLocaleDateString('ar-EG')
+        };
+        localStorage.setItem('probet_recommendations', JSON.stringify(data));
+    } catch (e) {
+        console.warn('[STORAGE] Failed to save:', e.message);
+    }
+}
+
+function restoreSavedRecommendations() {
+    try {
+        const saved = localStorage.getItem('probet_recommendations');
+        if (!saved) return;
+        
+        const data = JSON.parse(saved);
+        
+        // Only restore if from today
+        const savedDate = new Date(data.timestamp).toDateString();
+        const today = new Date().toDateString();
+        if (savedDate !== today) {
+            localStorage.removeItem('probet_recommendations');
+            return;
+        }
+        
+        if (data.acceptedMatches && data.acceptedMatches.length > 0) {
+            acceptedMatches = data.acceptedMatches;
+            
+            // Show recommendations section
+            const recSection = document.getElementById('recommendations-section');
+            recSection.classList.remove('hidden');
+            document.getElementById('recommendations-list').innerHTML = '';
+            document.getElementById('rec-count-badge').textContent = acceptedMatches.length;
+            
+            acceptedMatches.forEach(rec => renderRecommendation(rec));
+            
+            showStatus(`💾 تم استعادة ${acceptedMatches.length} توصية محفوظة من آخر جلسة اليوم`, 'success');
+        }
+    } catch (e) {
+        console.warn('[STORAGE] Failed to restore:', e.message);
+    }
+}
