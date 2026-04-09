@@ -121,19 +121,26 @@ class CourtroomSystem {
         const votesAgainst = opinions.filter(o => o.vote === 'against').length;
         const votesNeutral = opinions.filter(o => o.vote === 'neutral').length;
 
-        // Final verdict (Judge decides based on majority + score)
-        const judgeApproves = bestScore >= 90 && votesFor > votesAgainst;
+        // Final verdict — aligned with engine thresholds (72% strong, 65% cautious)
+        const highTraps = (analysisResult.traps || []).filter(t => t.severity === 'high').length;
+        const dcAccepted = analysisResult.decision?.dcAccepted || false;
+        const goalsAccepted = analysisResult.decision?.goalsAccepted || false;
+        const anyAccepted = dcAccepted || goalsAccepted;
+        
+        // Judge approves if engine approved AND votes aren't overwhelmingly against
+        const judgeApproves = anyAccepted && (votesAgainst <= votesFor + votesNeutral);
+        const cautious = anyAccepted && !judgeApproves;
 
         return {
             opinions,
             votesFor,
             votesAgainst,
             votesNeutral,
-            finalVerdict: judgeApproves ? 'هجوم' : 'تجاوز',
-            finalVerdictClass: judgeApproves ? 'attack' : 'skip',
+            finalVerdict: judgeApproves ? 'هجوم' : cautious ? 'بحذر' : 'تجاوز',
+            finalVerdictClass: judgeApproves ? 'attack' : cautious ? 'caution' : 'skip',
             bestOption,
             bestScore,
-            accepted: judgeApproves
+            accepted: judgeApproves || cautious
         };
     }
 
@@ -191,27 +198,31 @@ class CourtroomSystem {
     skepticAnalysis(analysis) {
         const { scores, traps, formAnalysis, decision } = analysis;
         const bestScore = decision.bestScore;
+        const confidence = decision.confidence;
         const points = [];
         let vote = 'against';
 
-        if (bestScore < 85) {
-            points.push('الأرقام لا تصل حتى لـ 85% — كيف نثق في هذا التوقع؟');
+        if (confidence < 60) {
+            points.push(`الثقة ${confidence.toFixed(1)}% فقط — لا أثق في هذا التوقع`);
             vote = 'against';
-        } else if (bestScore >= 90) {
-            points.push(`الأرقام تقول ${bestScore.toFixed(1)}% — مقبول لكن يجب التأكد`);
+        } else if (confidence >= 72) {
+            points.push(`الثقة ${confidence.toFixed(1)}% — مقبولة لكن يجب التأكد`);
             vote = 'neutral';
+        } else {
+            points.push(`الثقة ${confidence.toFixed(1)}% — في المنطقة الرمادية`);
+            vote = 'against';
         }
 
         if (traps.length > 0) {
             points.push(`هناك ${traps.length} فخ إحصائي — لا يمكن تجاهلهم`);
-            vote = 'against';
+            if (traps.some(t => t.severity === 'high')) vote = 'against';
         }
 
         if (formAnalysis.homeVolatile || formAnalysis.awayVolatile) {
             points.push('نتائج متذبذبة = خطر حقيقي. لماذا نثق في استمرار النمط؟');
         }
 
-        if (bestScore >= 92 && traps.length === 0) {
+        if (confidence >= 78 && traps.length === 0) {
             points.push('حسناً... البيانات قوية ولا أجد ثغرات — لكن الحذر واجب');
             vote = 'for';
         }
@@ -248,7 +259,7 @@ class CourtroomSystem {
             points.push(`فورم المضيف: <span class="highlight-green">${formAnalysis.homeFormScore.toFixed(1)}%</span>`);
         }
 
-        const vote = bestScore >= 90 ? 'for' : bestScore >= 85 ? 'neutral' : 'against';
+        const vote = decision.confidence >= 72 ? 'for' : decision.confidence >= 65 ? 'neutral' : 'against';
 
         return {
             analysis: 'الأرقام لا تكذب. إليكم الحسابات:',
@@ -280,7 +291,7 @@ class CourtroomSystem {
             points.push(`النسبة ${decision.bestScore.toFixed(1)}% لا تستوفي الحد الأدنى 90%!`);
         }
 
-        const vote = traps.length >= 2 || decision.bestScore < 88 ? 'against' : 'neutral';
+        const vote = traps.length >= 2 || decision.confidence < 65 ? 'against' : 'neutral';
 
         return {
             analysis: 'كوكيل نيابة، مهمتي إثبات أن هذا التوقع خطير:',
@@ -313,7 +324,7 @@ class CourtroomSystem {
             }
         }
 
-        const vote = decision.bestScore >= 90 ? 'for' : 'neutral';
+        const vote = decision.confidence >= 72 ? 'for' : 'neutral';
 
         return {
             analysis: 'بناءً على خبرتي في تحليل المباريات:',
@@ -349,7 +360,7 @@ class CourtroomSystem {
             points.push(`الأودز الضمنية تؤكد 1X بنسبة ${oddsAnalysis.dc1x.toFixed(1)}%`);
         }
 
-        const vote = decision.bestScore >= 85 ? 'for' : 'neutral';
+        const vote = decision.confidence >= 65 ? 'for' : 'neutral';
 
         return {
             analysis: 'سيدي القاضي، الأدلة واضحة لصالح التوقع:',
@@ -379,7 +390,7 @@ class CourtroomSystem {
 
         points.push(`كرة القدم لعبة مفاجآت — لا شيء مضمون 100%`);
 
-        const vote = decision.bestScore < 92 ? 'against' : 'neutral';
+        const vote = decision.confidence < 78 ? 'against' : 'neutral';
 
         return {
             analysis: 'أعترض على هذا التوقع. إليكم الأسباب:',
@@ -417,7 +428,7 @@ class CourtroomSystem {
             points.push(`⚠️ تناقض: القوة العامة جيدة لكن الفورم ضعيف — تحذير!`);
         }
 
-        const vote = decision.bestScore >= 90 ? 'for' : decision.bestScore >= 85 ? 'neutral' : 'against';
+        const vote = decision.confidence >= 72 ? 'for' : decision.confidence >= 65 ? 'neutral' : 'against';
 
         return {
             analysis: 'أبحث في الأنماط المخفية بين البيانات:',
@@ -506,26 +517,32 @@ class CourtroomSystem {
         const { scores, traps, decision } = analysis;
         const points = [];
         const bestOption = decision.bestOption;
-        const bestScore = decision.bestScore;
+        const confidence = decision.confidence;
+        const highTraps = traps.filter(t => t.severity === 'high').length;
 
-        points.push(`التوقع الأعلى: <span class="highlight-gold">${bestOption}</span> بنسبة <span class="highlight-gold">${bestScore.toFixed(1)}%</span>`);
+        points.push(`التوقع الأعلى: <span class="highlight-gold">${bestOption}</span> بثقة <span class="highlight-gold">${confidence.toFixed(1)}%</span>`);
 
-        if (bestScore >= 90) {
-            points.push(`✅ النسبة تتجاوز الحد الأدنى 90% — مؤهل للقبول`);
-            
+        if (decision.dcAccepted || decision.goalsAccepted) {
+            // Show which recommendations passed
+            let accepted = [];
+            if (decision.dcAccepted) accepted.push(`${bestOption} (${confidence.toFixed(1)}%)`);
+            if (decision.goalsAccepted) accepted.push(`Over 1.5 (${decision.goalsScore?.toFixed(1) || '?'}%)`);
+            points.push(`✅ توصيات مقبولة: ${accepted.join(' + ')}`);
+
             if (traps.length === 0) {
                 points.push(`✅ لا توجد فخاخ — أصدر حكمي: <span class="highlight-green">هجوم</span>`);
-            } else if (traps.filter(t => t.severity === 'high').length === 0) {
-                points.push(`⚠️ فخاخ بسيطة موجودة لكن النسبة تعوض — <span class="highlight-green">هجوم بحذر</span>`);
+            } else if (highTraps === 0) {
+                points.push(`⚠️ فخاخ بسيطة موجودة — <span class="highlight-green">هجوم بحذر</span>`);
             } else {
-                points.push(`🚨 فخاخ خطيرة رغم النسبة العالية — <span class="highlight-red">أخفض النسبة وأعيد التقييم</span>`);
+                points.push(`🚨 فخاخ خطيرة مكتشفة — <span class="highlight-red">أخفض الثقة</span>`);
             }
         } else {
-            points.push(`❌ النسبة ${bestScore.toFixed(1)}% أقل من 90% — <span class="highlight-red">المباراة مرفوضة</span>`);
+            points.push(`❌ الثقة ${confidence.toFixed(1)}% غير كافية — <span class="highlight-red">المباراة مرفوضة</span>`);
             points.push(`القرار: <span class="highlight-red">تجاوز المباراة — لا توجد فرصة مؤهلة</span>`);
         }
 
-        const vote = bestScore >= 90 && traps.filter(t => t.severity === 'high').length === 0 ? 'for' : 'against';
+        const vote = (decision.dcAccepted || decision.goalsAccepted) && highTraps === 0 ? 'for' : 
+                     (decision.dcAccepted || decision.goalsAccepted) ? 'neutral' : 'against';
 
         return {
             analysis: 'بعد سماع جميع الآراء، إليكم حكمي النهائي:',

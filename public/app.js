@@ -1046,6 +1046,78 @@ function getCountryFlag(country) {
 //  Fully autonomous: Fetch → Extract → Analyze → Recommend
 // ═══════════════════════════════════════════════════
 
+// ─── League Filter: Only 1st & 2nd Division ───
+function isAllowedLeague(leagueName) {
+    const name = leagueName.toLowerCase();
+    
+    // ❌ EXCLUDE: Cups, knockouts, friendlies, youth, 3rd division+
+    const excluded = [
+        'cup', 'copa', 'coupe', 'pokal', 'trophy', 'shield',
+        'كأس', 'كاس',
+        'friendly', 'club friendly',
+        'youth', 'u19', 'u20', 'u21', 'u23', 'reserve', 'women',
+        'amateur', 'regional',
+        'league 3', 'ligue 3', 'liga 3', 'serie c', 'serie d',
+        'division 3', 'division 4', 'division 5',
+        '3. liga', '3rd division', 'tercera', 'terza',
+        'national league', 'conference league',
+        'play offs', 'play-offs', 'playoff',
+        'qualification', 'qualifying',
+        'super cup', 'supercup', 'community shield',
+    ];
+    
+    for (const ex of excluded) {
+        if (name.includes(ex)) return false;
+    }
+    
+    // ✅ ALLOW: 1st & 2nd division leagues
+    const allowed = [
+        // 1st Division keywords
+        'premier league', 'la liga', 'laliga', 'bundesliga',
+        'serie a', 'ligue 1', 'eredivisie', 'primeira liga',
+        'super league', 'superliga', 'ekstraklasa',
+        'premiership', 'pro league', 'super lig',
+        'first division', '1. division', 'division 1',
+        'league 1', 'liga 1', 'liga i',
+        'ligue 1', 'serie a', 'a league',
+        '1st league', 'first league', 'top league',
+        'allsvenskan', 'eliteserien', 'veikkausliiga',
+        'mls', 'j1 league', 'k league',
+        'liga mx', 'brasileirao', 'serie a',
+        'championship', 'jupiler', 'ligat',
+        'saudi pro', 'stars league', 'indian super',
+        'roshn', 'botola', 'ligue professionnelle',
+        
+        // 2nd Division keywords  
+        '2. bundesliga', 'segunda', 'championship',
+        'serie b', 'ligue 2', 'league 2',
+        'segunda division', 'division 2', '2nd division',
+        'liga 2', 'liga ii', '2. division',
+        'eerste divisie', 'second league',
+        '2nd league', 'serie b',
+        
+        // Direct league level markers
+        'round', 'matchday', 'speeldag', 'spieltag', 'giornata', 'jornada',
+    ];
+    
+    for (const al of allowed) {
+        if (name.includes(al)) return true;
+    }
+    
+    // If no keyword matched, still allow if it looks like a regular league
+    // (has "league", "liga", "ligue", "serie", "division" without excluded terms)
+    const leagueTerms = ['league', 'liga', 'ligue', 'serie', 'division', 'premiership'];
+    for (const term of leagueTerms) {
+        if (name.includes(term)) return true;
+    }
+    
+    // Allow matches with "Round" in name (standard league matches)
+    if (name.includes('round')) return true;
+    
+    // Default: skip unknown
+    return false;
+}
+
 let autoPilotRunning = false;
 let autoPilotStopped = false;
 let acceptedMatches = [];
@@ -1104,8 +1176,9 @@ async function startAutoPilot() {
         result.leagues.forEach(league => {
             league.matches.forEach(m => {
                 allMatchesData.push(m);
-                // Only include scheduled matches with URLs
-                if (m.url && m.status === 'scheduled') {
+                const leagueName = (m.league || league.league || '').toLowerCase();
+                // Only include scheduled matches with URLs + filter leagues
+                if (m.url && m.status === 'scheduled' && isAllowedLeague(leagueName)) {
                     allMatches.push({
                         ...m,
                         leagueName: m.league || league.league,
@@ -1189,31 +1262,54 @@ async function startAutoPilot() {
                     
                     // Update feed
                     feedProcessing.className = 'autopilot-feed-item accepted';
+                    
+                    // Build feed text showing which recommendations accepted
+                    let feedParts = [];
+                    if (decision.dcAccepted) feedParts.push(`${decision.bestOption} (${decision.confidence.toFixed(1)}%)`);
+                    if (decision.goalsAccepted) feedParts.push(`Over 1.5 (${decision.goalsScore.toFixed(1)}%)`);
+                    
                     feedProcessing.innerHTML = `
                         <div class="feed-match-name">✅ ${matchName}</div>
                         <div class="feed-result accepted">
-                            ${decision.verdict} — ${decision.recommendation} — ثقة ${decision.confidence.toFixed(1)}%
+                            ${feedParts.join(' | ')}
                         </div>
                     `;
 
-                    // Add to accepted list
-                    const recItem = {
-                        matchName,
-                        league: matchLeague || extractResult.data.matchInfo?.league || '',
-                        country: matchCountry || '',
-                        time: match.time || extractResult.data.matchInfo?.dateTime || '',
-                        recommendation: decision.recommendation,
-                        confidence: decision.confidence,
-                        verdict: decision.verdict,
-                        action: decision.action,
-                        bestScore: decision.bestScore,
-                        allScores: decision.allScores,
-                        url: match.url
-                    };
-                    acceptedMatches.push(recItem);
+                    // Add to accepted list — create separate items for DC and Goals
+                    if (decision.dcAccepted) {
+                        const dcItem = {
+                            matchName,
+                            league: matchLeague || extractResult.data.matchInfo?.league || '',
+                            country: matchCountry || '',
+                            time: match.time || extractResult.data.matchInfo?.dateTime || '',
+                            recommendation: decision.bestOption,
+                            type: 'فرصة مزدوجة',
+                            confidence: decision.confidence,
+                            verdict: decision.verdict,
+                            action: `✅ ${decision.bestOption} (${decision.allScores[decision.bestOption].label})`,
+                            url: match.url
+                        };
+                        acceptedMatches.push(dcItem);
+                        renderRecommendation(dcItem);
+                    }
                     
-                    // Render recommendation
-                    renderRecommendation(recItem);
+                    if (decision.goalsAccepted) {
+                        const goalsItem = {
+                            matchName,
+                            league: matchLeague || extractResult.data.matchInfo?.league || '',
+                            country: matchCountry || '',
+                            time: match.time || extractResult.data.matchInfo?.dateTime || '',
+                            recommendation: 'Over 1.5',
+                            type: 'أكتر من 1.5 هدف',
+                            confidence: decision.goalsScore,
+                            verdict: `⚽ Over 1.5 — ثقة ${decision.goalsScore.toFixed(1)}%`,
+                            action: '✅ أكتر من 1.5 هدف في المباراة',
+                            url: match.url
+                        };
+                        acceptedMatches.push(goalsItem);
+                        renderRecommendation(goalsItem);
+                    }
+                    
                     document.getElementById('rec-count-badge').textContent = acceptedMatches.length;
 
                 } else {
