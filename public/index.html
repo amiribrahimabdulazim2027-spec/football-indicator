@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="مؤشر تحليل الفرصة المزدوجة — Double Chance Analyst Pro — تحليل إحصائي احترافي لمباريات كرة القدم">
+    <title>🎯 المؤشر الذهبي — Double Chance Analyst Pro</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- ═══ Particles Background ═══ -->
+    <div id="particles-bg"></div>
+
+    <!-- ═══ Header ═══ -->
+    <header id="main-header">
+        <div class="header-glow"></div>
+        <div class="header-content">
+            <div class="logo-section">
+                <div class="logo-icon">
+                    <span class="logo-emoji">🎯</span>
+                    <div class="logo-ring"></div>
+                </div>
+                <div class="logo-text">
+                    <h1>المؤشر الذهبي</h1>
+                    <p class="subtitle">Double Chance Analyst Pro</p>
+                </div>
+            </div>
+            <div class="header-badge">
+                <span class="badge-dot"></span>
+                <span>Guaranteed ≥ 90%</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- ═══ Matches Browser Section ═══ -->
+    <section id="matches-section">
+        <div class="matches-browser-card">
+            <div class="matches-browser-header">
+                <div class="matches-browser-title">
+                    <span class="section-icon">⚽</span>
+                    <h2>مباريات اليوم</h2>
+                    <span id="matches-count-badge" class="matches-count-badge hidden">0</span>
+                </div>
+                <div class="matches-browser-actions">
+                    <button id="btn-fetch-matches" class="btn btn-fetch" onclick="fetchAllMatches()">
+                        <span class="btn-icon">📡</span>
+                        <span class="btn-text">جلب المباريات</span>
+                        <div class="btn-shine"></div>
+                    </button>
+                    <button id="btn-auto-pilot" class="btn btn-autopilot" onclick="startAutoPilot()">
+                        <span class="btn-icon">🚀</span>
+                        <span class="btn-text">تشغيل تلقائي</span>
+                        <div class="btn-shine"></div>
+                    </button>
+                    <button id="btn-stop-pilot" class="btn btn-stop hidden" onclick="stopAutoPilot()">
+                        <span class="btn-icon">⏹️</span>
+                        <span class="btn-text">إيقاف</span>
+                    </button>
+                    <button id="btn-toggle-url" class="btn btn-url-toggle" onclick="toggleUrlInput()" title="إدخال رابط يدوي">
+                        <span class="btn-icon">🔗</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Manual URL Input (collapsed) -->
+            <div id="manual-url-section" class="manual-url-section hidden">
+                <div class="input-row">
+                    <div class="input-wrapper">
+                        <input type="text" id="match-url" placeholder="https://www.flashscore.com/match/xxxxxxxx/" autocomplete="off">
+                        <div class="input-glow"></div>
+                    </div>
+                    <button id="btn-extract-url" class="btn btn-extract" onclick="handleExtractFromUrl()">
+                        <span class="btn-icon">📡</span>
+                        <span class="btn-text">استخراج</span>
+                        <div class="btn-shine"></div>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Search/Filter -->
+            <div id="matches-filter-section" class="matches-filter hidden">
+                <div class="search-wrapper">
+                    <span class="search-icon">🔍</span>
+                    <input type="text" id="matches-search" placeholder="ابحث عن فريق أو بطولة..." oninput="filterMatches()" autocomplete="off">
+                </div>
+                <div class="filter-stats">
+                    <span id="filter-status-text" class="filter-status-text"></span>
+                </div>
+            </div>
+
+            <!-- Status Bar -->
+            <div id="status-bar" class="status-bar hidden">
+                <div class="status-spinner"></div>
+                <span id="status-text">جاري الاستخراج...</span>
+            </div>
+
+            <!-- Matches List -->
+            <div id="matches-list-container" class="matches-list-container">
+                <div class="matches-empty-state" id="matches-empty">
+                    <div class="empty-icon">⚽</div>
+                    <p>اضغط <strong>"جلب المباريات"</strong> لتحميل جميع مباريات اليوم من FlashScore</p>
+                    <p class="empty-sub">أو استخدم أيقونة 🔗 لإدخال رابط مباراة يدوياً</p>
+                </div>
+            </div>
+
+            <!-- Auto-Pilot Progress -->
+            <div id="autopilot-progress" class="autopilot-progress hidden">
+                <div class="autopilot-header">
+                    <span class="autopilot-icon">🚀</span>
+                    <h3>التشغيل التلقائي</h3>
+                    <span id="autopilot-status" class="autopilot-status">جاري التحليل...</span>
+                </div>
+                <div class="progress-bar-wrapper">
+                    <div class="progress-bar">
+                        <div id="autopilot-bar" class="progress-bar-fill" style="width: 0%"></div>
+                    </div>
+                    <span id="autopilot-percent" class="progress-percent">0%</span>
+                </div>
+                <div class="autopilot-stats">
+                    <div class="autopilot-stat">
+                        <span class="stat-label">تم تحليلها</span>
+                        <span id="stat-analyzed" class="stat-value">0</span>
+                    </div>
+                    <div class="autopilot-stat">
+                        <span class="stat-label">مقبولة ✅</span>
+                        <span id="stat-accepted" class="stat-value accepted">0</span>
+                    </div>
+                    <div class="autopilot-stat">
+                        <span class="stat-label">مرفوضة ❌</span>
+                        <span id="stat-rejected" class="stat-value rejected">0</span>
+                    </div>
+                    <div class="autopilot-stat">
+                        <span class="stat-label">متبقية</span>
+                        <span id="stat-remaining" class="stat-value">0</span>
+                    </div>
+                </div>
+                <div id="autopilot-current" class="autopilot-current">
+                    <span>⏳ جاري تحليل: </span><span id="current-match-name">—</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══ Recommendations Section ═══ -->
+    <section id="recommendations-section" class="recommendations-section hidden">
+        <div class="recommendations-card">
+            <div class="recommendations-header">
+                <div class="recommendations-title">
+                    <span class="rec-icon">🏆</span>
+                    <h2>المباريات المُوصى بها</h2>
+                    <span id="rec-count-badge" class="rec-count-badge">0</span>
+                </div>
+                <div class="recommendations-subtitle">المباريات التي اجتازت تحليل المحكمة بنجاح</div>
+            </div>
+            <div id="recommendations-list" class="recommendations-list"></div>
+        </div>
+    </section>
+
+    <!-- ═══ Main Content ═══ -->
+    <main id="main-content">
+        <!-- Left Panel: Data -->
+        <section id="data-panel" class="panel">
+            <div class="panel-header">
+                <span>📊</span>
+                <h2>لوحة البيانات</h2>
+                <button id="btn-analyze" class="btn btn-analyze btn-sm" onclick="handleAnalyze()" disabled>
+                    <span class="btn-icon">⚖️</span>
+                    <span class="btn-text">تحليل المباراة</span>
+                    <div class="btn-shine"></div>
+                </button>
+            </div>
+
+            <!-- Match Info Card -->
+            <div id="match-info-card" class="data-card hidden">
+                <div class="card-header">
+                    <span>⚽</span>
+                    <h3>معلومات المباراة</h3>
+                </div>
+                <div class="match-versus">
+                    <div class="team home-team">
+                        <div class="team-badge home-badge">🏠</div>
+                        <span id="home-team-name" class="team-name">—</span>
+                    </div>
+                    <div class="versus-center">
+                        <span class="versus-text">VS</span>
+                        <span id="match-datetime" class="match-time">—</span>
+                    </div>
+                    <div class="team away-team">
+                        <div class="team-badge away-badge">✈️</div>
+                        <span id="away-team-name" class="team-name">—</span>
+                    </div>
+                </div>
+                <div class="match-meta">
+                    <span id="match-league" class="meta-tag">—</span>
+                    <span id="match-round" class="meta-tag">—</span>
+                </div>
+            </div>
+
+            <!-- Standings Cards -->
+            <div id="standings-section" class="hidden">
+                <!-- Overall -->
+                <div class="data-card">
+                    <div class="card-header">
+                        <span>📊</span>
+                        <h3>الترتيب العام</h3>
+                        <span class="card-badge">Overall</span>
+                    </div>
+                    <div class="table-wrapper">
+                        <table id="table-overall" class="standings-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>الفريق</th>
+                                    <th>لعب</th>
+                                    <th>فوز</th>
+                                    <th>تعادل</th>
+                                    <th>خسارة</th>
+                                    <th>أهداف</th>
+                                    <th>فارق</th>
+                                    <th>نقاط</th>
+                                    <th>الفورم</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Home -->
+                <div class="data-card">
+                    <div class="card-header">
+                        <span>🏠</span>
+                        <h3>ترتيب الديار</h3>
+                        <span class="card-badge home-badge-tag">Home</span>
+                    </div>
+                    <div class="table-wrapper">
+                        <table id="table-home" class="standings-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>الفريق</th>
+                                    <th>لعب</th>
+                                    <th>فوز</th>
+                                    <th>تعادل</th>
+                                    <th>خسارة</th>
+                                    <th>أهداف</th>
+                                    <th>فارق</th>
+                                    <th>نقاط</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Away -->
+                <div class="data-card">
+                    <div class="card-header">
+                        <span>✈️</span>
+                        <h3>ترتيب الخارج</h3>
+                        <span class="card-badge away-badge-tag">Away</span>
+                    </div>
+                    <div class="table-wrapper">
+                        <table id="table-away" class="standings-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>الفريق</th>
+                                    <th>لعب</th>
+                                    <th>فوز</th>
+                                    <th>تعادل</th>
+                                    <th>خسارة</th>
+                                    <th>أهداف</th>
+                                    <th>فارق</th>
+                                    <th>نقاط</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Last Matches -->
+            <div id="last-matches-section" class="hidden">
+                <div class="data-card">
+                    <div class="card-header">
+                        <span>📅</span>
+                        <h3>آخر مباريات المضيف</h3>
+                    </div>
+                    <div id="last-matches-home" class="matches-list"></div>
+                </div>
+                <div class="data-card">
+                    <div class="card-header">
+                        <span>📅</span>
+                        <h3>آخر مباريات الضيف</h3>
+                    </div>
+                    <div id="last-matches-away" class="matches-list"></div>
+                </div>
+            </div>
+
+            <!-- H2H -->
+            <div id="h2h-section" class="data-card hidden">
+                <div class="card-header">
+                    <span>🤝</span>
+                    <h3>المواجهات المباشرة</h3>
+                    <span class="card-badge">H2H</span>
+                </div>
+                <div id="h2h-list" class="matches-list"></div>
+            </div>
+
+            <!-- Odds -->
+            <div id="odds-section" class="data-card hidden">
+                <div class="card-header">
+                    <span>💰</span>
+                    <h3>الاحتمالات</h3>
+                    <span class="card-badge">Odds</span>
+                </div>
+                <div class="odds-grid">
+                    <div class="odd-cell">
+                        <span class="odd-label">فوز المضيف (1)</span>
+                        <span id="odd-home" class="odd-value">—</span>
+                    </div>
+                    <div class="odd-cell">
+                        <span class="odd-label">تعادل (X)</span>
+                        <span id="odd-draw" class="odd-value">—</span>
+                    </div>
+                    <div class="odd-cell">
+                        <span class="odd-label">فوز الضيف (2)</span>
+                        <span id="odd-away" class="odd-value">—</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Manual Data Entry Toggle -->
+            <div class="data-card">
+                <div class="card-header clickable" onclick="toggleManualEntry()">
+                    <span>✏️</span>
+                    <h3>إدخال البيانات يدوياً</h3>
+                    <span class="toggle-arrow" id="manual-toggle-arrow">▼</span>
+                </div>
+                <div id="manual-entry" class="manual-entry hidden">
+                    <textarea id="manual-data" placeholder="الصق البيانات هنا بالتنسيق المطلوب في البروميت...
+                    
+مثال:
+الدوري: الدوري الجزائري
+الفريق المضيف: MC Oran
+الفريق الضيف: Rouisset
+..." rows="15"></textarea>
+                    <button class="btn btn-manual" onclick="parseManualData()">
+                        <span class="btn-icon">📋</span>
+                        <span class="btn-text">تطبيق البيانات</span>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Right Panel: Courtroom -->
+        <section id="courtroom-panel" class="panel">
+            <div class="panel-header">
+                <span>⚖️</span>
+                <h2>المحكمة</h2>
+                <div class="court-status" id="court-status">
+                    <span class="court-dot"></span>
+                    <span>في انتظار البيانات</span>
+                </div>
+            </div>
+
+            <!-- Courtroom Characters -->
+            <div id="courtroom-arena" class="courtroom-arena">
+                <div class="court-empty-state" id="court-empty">
+                    <div class="court-icon">⚖️</div>
+                    <p>المحكمة في انتظار البيانات للتحليل</p>
+                    <p class="court-sub">استخرج البيانات أولاً ثم اضغط "تحليل المباراة"</p>
+                </div>
+            </div>
+
+            <!-- Final Verdict -->
+            <div id="verdict-section" class="verdict-section hidden">
+                <div class="verdict-header">
+                    <span>🏆</span>
+                    <h3>القرار النهائي</h3>
+                </div>
+                <div id="verdict-content" class="verdict-content"></div>
+            </div>
+        </section>
+    </main>
+
+    <!-- ═══ Footer ═══ -->
+    <footer>
+        <p>Double Chance Analyst Pro — مؤشر تحليلي احترافي 🎯</p>
+    </footer>
+
+    <script src="analysis-engine.js"></script>
+    <script src="courtroom.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
